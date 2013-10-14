@@ -1,0 +1,73 @@
+# -*- coding: utf-8 -*-
+#!/usr/bin/python
+
+# Common tools for iterables (Python 2.7)
+
+import codecs
+from collections import deque
+
+def eq(a, b, eps=0.00000000000000000001):
+    """
+    Проверка равенства чисел типа float
+    """
+    return abs(a - b) <=  eps
+
+def argmax(lst):
+    """
+    Нахождение аргмаксимума (возвращает только аргмаксимум)
+    """
+    if not lst:
+        return None
+    return [x for (x, y) in lst if eq(y, max([b for (a, b) in lst]))]
+
+def argmaxx(lst):
+    """
+    Нахождение аргмаксимума (возвращает кортеж (аргмаксимум, максимум))
+    """
+    if not lst:
+        return None
+    return [(x, y) for (x, y) in lst if eq(y, max([b for (a, b) in lst]))]
+
+def MI(f_xy, f_x, f_y, N):
+    """
+    Взаимная информация
+    """
+    return float(f_xy * N) / (f_x * f_y)
+
+def smart_range(nums, num, radius):
+    """
+    Обертка среза range
+    """
+    start = num - radius
+    if start < 0:
+        start = 0
+    end = num + radius
+    if end >= len(nums):
+        return list(range(start, num)) + list(range(num + 1, len(nums)))
+    return list(range(start, num)) + list(range(num + 1, num + radius + 1))
+
+def smart_slice(items, start, end):
+    """
+    Обертка среза списка
+    """
+    if start < 0:
+        start = 0
+    if end < len(items):
+        return items[start:end]
+    else:
+        return items[start:]
+ 
+def read_file(filename):
+    """
+    Чтение файла с текстом на русском языке в неизвестной кодировке (cp1251 или UTF-8)
+    """
+    try:
+        # Определение кодировки: ASCII
+        with open(filename, "r") as tfile:
+            text = tfile.read().decode("cp1251").encode("UTF8").decode("UTF8")  
+    except Exception:
+        # Определение кодировки: UTF-8
+        with codecs.open(filename, "r", encoding="UTF8") as tfile:
+            text = tfile.read()
+    return text
+
