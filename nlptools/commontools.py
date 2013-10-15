@@ -4,6 +4,7 @@
 # Common tools for iterables (Python 2.7)
 
 import codecs
+import struct
 from collections import deque
 
 def eq(a, b, eps=0.00000000000000000001):
@@ -33,6 +34,22 @@ def MI(f_xy, f_x, f_y, N):
     Взаимная информация
     """
     return float(f_xy * N) / (f_x * f_y)
+
+def get_DAWG(freqs, word):
+    """
+    Извлечение слова из DAWG
+    """
+    if word in freqs:
+        return freqs[word]
+    return 0.0
+
+def get_floatDAWG(freqs, word, small):
+    """
+    Извлечение слова из BytesDAWG
+    """    
+    if word in freqs:
+        return struct.unpack("f", freqs[word][0])[0]
+    return small
 
 def smart_range(nums, num, radius):
     """

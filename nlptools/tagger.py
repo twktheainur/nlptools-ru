@@ -19,7 +19,9 @@ import math
 from random import choice
 from datetime import datetime
 from collections import defaultdict, OrderedDict
+import struct
 
+import dawg
 from pymorphy import get_morph
 from pickling import *
 from tokenizer import Tokenizer
@@ -77,7 +79,7 @@ class Tagger(object):
         self.cases = {u"им", u"рд", u"дт", u"вн", u"тв", u"пр"}
         self.caseable = {u"С", u"П", u"ПРИЧАСТИЕ", u"МС-П", u"ЧИСЛ-П"}
         # Суффиксные частоты
-        self.freqs = inner_func_float()
+        self.freqs = dawg.BytesDAWG()
         self.weights = defaultdict(float)
         self.small = 0.0
 
@@ -281,6 +283,11 @@ class Tagger(object):
         ranks = defaultdict(float)
         caseranks = defaultdict(float)
 
+        # Структура словаря: {<Номер в контексте>, <Контекст>, <Список омонимов> : <Выбранный омоним> : <Вероятность>}
+        normfreqs = defaultdict(lambda: defaultdict(float))
+        # Структура словаря: {<Номер в контексте>, <Контекст>: <Ранг>}
+        normweights = defaultdict(float)
+
         # Собираем частоты из корпуса
         with codecs.open(trainfile, "r", encoding="UTF8") as fin:
             sentence = []
@@ -299,7 +306,7 @@ class Tagger(object):
         for k, v in freqs.items():
             total = sum([freq for freq in v.values()])
             for hom, freq in v.items():
-                self.freqs[k][hom] = float(freq) / total
+                normfreqs[k][hom] = float(freq) / total
                 
         # Вычисляем ранги контекстов
         for k, v in cfreqs.items():
@@ -308,19 +315,23 @@ class Tagger(object):
             ranks[k] = 1.0 / math.exp(entropy)
 
         # Вычисляем веса контекстов
-        self.weights = defaultdict(float)
         for k, v in ranks.items():
-            self.weights[k[0]] += v
+            normweights[k[0]] += v
 
-        v_sum = sum([v for v in self.weights.values()])
-        for k, v in self.weights.items():
-            self.weights[k] = v / v_sum
+        v_sum = sum([v for v in normweights.values()])
+        for k, v in normweights.items():
+            normweights[k] = v / v_sum
 
         # Сериализуем частоты и веса (ранги) контекстов (чем больше энтропия распределения по омонимам, тем меньше ранг (вес))
-        # Структура: <Номер в контексте>, <Список омонимов> : <Ранг>
-        dump_data(trainfile + ".weights.pkl", self.weights)  
-        # Структура: <Номер в контексте>, <Контекст>, <Список омонимов> : <Выбранный омоним> : <Вероятность>
-        dump_data(trainfile + ".freqs.pkl", self.freqs)
+
+        dfreqs = dawg.BytesDAWG([(u"{0:d}\t{1}\t{2}\t{3}".format(k[0], k[1], " ".join(k[2]), hom), struct.pack("f", freq))
+                                     for k, v in normfreqs.iteritems() for hom, freq in v.iteritems()])
+        dfreqs.save(trainfile + ".freqs.dawg")
+        dump_data(trainfile + ".weights.pkl", normweights)
+
+        # Сериализуем small-значение (для тех случаев, которых нет в словаре)
+        small = 1.0 / (2 * sum([freq for k, v in normfreqs.iteritems() for v1, freq in v.iteritems()]))
+        dump_data(trainfile + ".small", small)  
         return True
 
     def train_cases(self, trainfile, threshold=4, small_diff=0.01):
@@ -391,15 +402,20 @@ class Tagger(object):
                 fout.write(u"{0}\t{1}\t{2}\n".format(k[0], "|".join(k[1]), v))
         return True
     
-    def load_statistics(self, trainfile, trainfilesuff):
+    def load_statistics(self, trainfile):
         """
         Загрузка суффиксной и падежной статистики
         """
         try:
             self.caserules = unpkl_1layered_s(trainfile + ".caserules.pkl")
-            self.freqs = unpkl_2layered_f(trainfilesuff + ".freqs.pkl")
-            self.weights = unpkl_1layered_f(trainfilesuff + ".weights.pkl")
-            self.small = 1.0 / (2 * sum([freq for k, v in self.freqs.iteritems() for v1, freq in v.iteritems()]))
+            #self.freqs = unpkl_2layered_f(trainfilesuff + ".freqs.pkl")
+            self.weights = unpkl_1layered_f(trainfile + ".suffs.weights.pkl")
+            self.freqs = dawg.BytesDAWG()
+            self.freqs.load(trainfile + ".suffs.freqs.dawg")
+            #self.weights = dawg.BytesDAWG()
+            #self.weights.load(trainfile + ".suffs.weights.dawg")
+            with open(trainfile + ".suffs.small", "rb") as fin:
+                self.small = pickle.load(fin)
         except Exception as e:
             print "Tagger statistics not found!\n", e
             sys.exit()
@@ -469,7 +485,6 @@ class Tagger(object):
         """
         Снятие падежной омонимии слов предложения
         """
-
         caseambigs = [ind for ind in sent_words.keys()
                 if len(sent_words[ind]) > 2
                 and all(info["class"] in self.caseable for info in sent_words[ind][1:])]
@@ -540,7 +555,7 @@ class Tagger(object):
         for (ind, rel_num) in ambigs:
             suff_list = suffixes[(ind, rel_num)]
             pairs = contexts[(ind, rel_num)]
-            probs = [(var, sum([self.freqs[(rel_ind, sf, tuple(suff_list))].get(var, self.small) * self.weights[rel_ind]
+            probs = [(var, sum([get_floatDAWG(self.freqs, u"{0:d}\t{1}\t{2}\t{3}".format(rel_ind, sf, " ".join(suff_list), var), self.small) * self.weights[rel_ind]
                          for (rel_ind, sf) in pairs])) for var in suff_list]
             arg_max = argmaxx(probs) # Список наиболее вероятных суффиксов
 
@@ -711,8 +726,8 @@ if __name__ == "__main__":
     dater = Dater() # Подгружаем обработчик дат
     tagger = Tagger(morph, morph_simple, dater)  # Подгружаем тэггер
     #tagger.train_cases(trainfile) # Обучаем тэггер падежам
-    #tagger.train(trainfilesuff) # Обучаем тэггер суффиксам
-    tagger.load_statistics(trainfile, trainfile + ".suffs")   # Загружаем суффиксную статистику
+    #tagger.train(trainfile + ".suffs") # Обучаем тэггер суффиксам
+    tagger.load_statistics(trainfile)   # Загружаем суффиксную статистику  
     #tagger.dump_preps(prepsfile)   # Выписываем правила падежей в зависимости от предлогов в текстовый файл
 
     print "Statistics loaded! It took", time.time() - start, "\nParsing file..."

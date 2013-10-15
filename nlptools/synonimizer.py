@@ -28,7 +28,7 @@ from pickling import *
 
 def html(text):
     """
-    # HTML-форматирование текста
+    HTML-форматирование текста
     """
     return "<p>" + re.sub(r"\n+", "</p><p>", text) + "</p>"
 
@@ -146,15 +146,6 @@ class Synonimizer(object):
             self.indexed_wsyns = defaultdict(str) # Словарь типа {номер токена: синоним}
         else:
             self.indexed_syns = defaultdict(str) # Словарь типа {номер токена: синоним}
-
-    @staticmethod
-    def get_DAWG(freqs, word):
-        """
-        Извлечение слова из DAWG
-        """
-        if word in freqs:
-            return freqs[word]
-        return 0.0
 
     @staticmethod
     def add_contexts(all_syns, contexts, sentence, n):
@@ -535,12 +526,12 @@ class Synonimizer(object):
             infl_syns.remove(None)
         infl_syns = set([get_same_caps(wform, x) for x in infl_syns])   # Синонимы данного слова в нужной форме
 
-        probs = [(syn, sum([Synonimizer.get_DAWG(self.collocs,
+        probs = [(syn, sum([get_DAWG(self.collocs,
                                            sent_words[x_l][0].lower().replace(u"ё", u"е") +
                                            "|" +
                                            syn.lower()) * self.posfreqs[main_pos]["L"][sent_words[x_l][1]["class"]]
                            for x_l in valid_left]) +
-                 sum([Synonimizer.get_DAWG(self.collocs,
+                 sum([get_DAWG(self.collocs,
                                            sent_words[x_r][0].lower().replace(u"ё", u"е") +
                                            "|" +
                                            syn.lower()) * self.posfreqs[main_pos]["R"][sent_words[x_r][1]["class"]]
@@ -653,9 +644,9 @@ class Synonimizer(object):
             lexeme = sent[num][1]["norm"]
             if not self.syns[lexeme]:
                 continue
-            probs = [(var, reduce(mul, [float(self.contexts["|".join((var, word))] + 1) / (Synonimizer.get_DAWG(self.freqs, var) + 2) \
+            probs = [(var, reduce(mul, [float(self.contexts["|".join((var, word))] + 1) / (get_DAWG(self.freqs, var) + 2) \
                                         for word in context \
-                                        if "|".join((var, word)) in self.contexts], 0) * float(Synonimizer.get_DAWG(self.freqs, var)) / self.f_sum) \
+                                        if "|".join((var, word)) in self.contexts], 0) * float(get_DAWG(self.freqs, var)) / self.f_sum) \
                       for var in self.syns[lexeme]]
             arg_max = argmax(probs)
             if arg_max and len(arg_max) <= self.vars_count:
@@ -777,7 +768,7 @@ if __name__ == "__main__":
         tokens = tok.tokenize(text)
         if syner.UseDisambig:
             ttime = time.time()
-            tagger.load_statistics(pl(morphcorpus), pl(morphcorpus + ".suffs"))
+            tagger.load_statistics(pl(morphcorpus))
             print "Tagger statistics loaded! It took", time.time() - ttime, "\nReading file..."
             sentences = tagger.get_parsed_sents(tokens)         # Снимаем морфологическую омонимию
         else:
