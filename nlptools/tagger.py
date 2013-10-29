@@ -248,7 +248,7 @@ class Tagger(object):
                 continue
             if not info[2].split("|")[0] in self.caseable: # Работаем только со словами, которые могут иметь падеж
                 continue            
-            norms = self.gram_all(info[0], False)  # Все возможные варианты лемм текущего слова
+            norms = self.gram_all(info[0])  # Все возможные варианты лемм текущего слова
             try:
                 true_cases = set(info[2].split("|")[1].split(",")).intersection(self.cases)
                 if len(true_cases) > 1:
@@ -713,7 +713,7 @@ class Tagger(object):
 
 if __name__ == "__main__":
 
-    filename = os.path.join(os.path.dirname(sys.argv[0]), "test/delo.txt")
+    filename = os.path.join(os.path.dirname(sys.argv[0]), "test/freview.txt")
     trainfile = os.path.join(os.path.dirname(sys.argv[0]),"dicts/ruscorpora.txt.lemma")
     #prepsfile = os.path.join(os.path.dirname(sys.argv[0]),"corpora/preps_stat.txt")
     
