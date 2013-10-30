@@ -66,6 +66,11 @@ class Tagger(object):
         self.splitter = re.compile("[.?!]+")
         self.starter = re.compile(u"[А-ЯЁA-Z\d\"\'\(\)\[\]~`«s-]")
         self.bad_ender = re.compile(u"^[А-ЯЁа-яёA-Za-z][а-яёa-z]?$")
+
+        # Рег. выражение для управления
+        self.prepcase = re.compile(u"\d+:ПРЕДЛ(?:\d+:(?:П|МС-П|ПРИЧАСТИЕ|ЧАСТ|СОЮЗ|Н))*\d+:(?:П|С|МС|МС-П)(?:\d+:СОЮЗ\d+:(?:С|МС))?")
+        #self.prepcase = re.compile(u"\d+:ПРЕДЛ(?:\s\d+:(?:П|ПРИЧАСТИЕ|ЧАСТ|СОЮЗ))*\s\d+:(?:П|С)(\s\d+:СОЮЗ\s\d+:С)?")
+        self.positem = re.compile(u"\d+:[А-Я-]+")
         # Морфология
         self.morph = morph
         self.morph_simple = morph_simple
@@ -77,7 +82,7 @@ class Tagger(object):
         self.excepts = unpkl_2layered_s(os.path.join(os.path.dirname(sys.argv[0]), "dicts/exceptions.pkl"))
         # Падежи
         self.cases = {u"им", u"рд", u"дт", u"вн", u"тв", u"пр"}
-        self.caseable = {u"С", u"П", u"ПРИЧАСТИЕ", u"МС-П", u"ЧИСЛ-П"}
+        self.declinable = {u"С", u"МС", u"П", u"ПРИЧАСТИЕ", u"МС-П", u"ЧИСЛ-П"}
         # Суффиксные частоты
         self.freqs = dawg.BytesDAWG()
         self.weights = defaultdict(float)
@@ -225,11 +230,25 @@ class Tagger(object):
         ind - номер данного слова в предложении sentence
         """
         sent = dict(enumerate(sentence))
-        cur = ind - 1
+        """
+        target = itertools.dropwhile(lambda x:
+                                     len(sent[x]) < 3 and not re.match(self.splitter, sent[x][0])
+                                     or sent[x][2] in {u"П", u"ПРИЧАСТИЕ", u"ЧАСТ", u"СОЮЗ", u"Н", u"МС-П"},
+                                     list(xrange(ind))[::-1])
+
+        if not target:
+            return "_"
+        try:
+            if sent[target[0]][2] == u"ПРЕДЛ":
+                return sent[target[0]][1]
+        except Exception: pass
+        return "_"
+
+        """
         for cur in list(xrange(ind))[::-1]:
             if len(sent[cur]) < 3 and not re.match(self.splitter, sent[cur][0]):
                 continue
-            if not sent[cur][2] in {u"П", u"ПРИЧАСТИЕ", u"ЧАСТ", u"СОЮЗ"}:
+            if not sent[cur][2] in {u"П", u"ПРИЧАСТИЕ", u"ЧАСТ", u"СОЮЗ", u"Н", u"МС-П"}:
                 break
         if sent[cur][2] == u"ПРЕДЛ":
             return sent[cur][1]
@@ -243,10 +262,10 @@ class Tagger(object):
         """
         if not sentence:
             return True
-        for (info, ind) in zip(sentence, xrange(len(sentence))):
+        for (ind, info) in enumerate(sentence):
             if len(info) < 3:
                 continue
-            if not info[2].split("|")[0] in self.caseable: # Работаем только со словами, которые могут иметь падеж
+            if not info[2].split("|")[0] in self.declinable: # Работаем только со словами, которые могут иметь падеж
                 continue            
             norms = self.gram_all(info[0])  # Все возможные варианты лемм текущего слова
             try:
@@ -264,7 +283,53 @@ class Tagger(object):
                 continue
                       
         return True
-   
+
+    def count_sentence_cases_re(self, sentence, freqs):
+        """
+        Сбор статистики на основе падежей: обработка одного предложения (sentence)
+        
+        freqs - словарь для наполнения статистикой
+        """
+
+        words = [(ind, info) for (ind, info) in enumerate(sentence) if len(info) > 2]
+        words_pat = "".join([u"{0:d}:{1}".format(ind, info[2].split("|")[0]) for (ind, info) in words])
+        matches = re.findall(self.prepcase, words_pat)
+        if matches == []:
+            return True
+        found = set()
+        for match_obj in matches:
+            pos_items = re.findall(self.positem, match_obj)
+            inds = [int(x.split(":")[0]) for x in pos_items]
+            found = found.union(set(inds))
+            prep = sentence[inds[0]][1]
+       
+            for pos_item in pos_items[1:]:
+                ind = int(pos_item.split(":")[0])
+                if sentence[ind][2].split("|")[0] in self.declinable:
+                    self.add_case_counts(sentence[ind], freqs, prep)
+
+        for (ind, info) in ((ind, info) for (ind, info) in words if info[2].split("|")[0] in self.declinable and not ind in found):
+            self.add_case_counts(info, freqs, "_")
+
+        return True
+
+    def add_case_counts(self, info, freqs, prep):
+        norms = self.gram_all(info[0])  # Все возможные варианты лемм текущего слова
+        try:
+            true_cases = set(info[2].split("|")[1].split(",")).intersection(self.cases)
+            if len(true_cases) > 1:
+                return True
+            true_case = true_cases.pop()
+            all_vars = [norm for norm in norms if norm.has_key("info")]
+            all_cases = set([x for y in [set(norm["info"].split(",")).intersection(self.cases)
+                                         for norm in all_vars] for x in y])
+            if not true_case in all_cases or len(all_cases) == 1:
+                return True
+            freqs[(prep, tuple(sorted(all_cases)))][true_case] += 1
+        except Exception:
+            return True
+        return True
+        
     def train(self, trainfile, radius=4, suff_len=3):
         """
         Сбор статистики на основе суффиксов: обработка всего корпуса
@@ -331,10 +396,11 @@ class Tagger(object):
 
         # Сериализуем small-значение (для тех случаев, которых нет в словаре)
         small = 1.0 / (2 * sum([freq for k, v in normfreqs.iteritems() for v1, freq in v.iteritems()]))
-        dump_data(trainfile + ".small", small)  
+        dump_data(trainfile + ".small", small)
+        
         return True
 
-    def train_cases(self, trainfile, threshold=4, small_diff=0.01):
+    def train_cases(self, trainfile, threshold=1, small_diff=0.01):
         """
         Обучение снятию падежной омонимии (автоматическое извлечение правил)
         
@@ -345,6 +411,8 @@ class Tagger(object):
         freqs = defaultdict(lambda: defaultdict(int))
         self.caserules = defaultdict(str)
 
+        t = time.time()
+
         # Собираем частоты из корпуса
         with codecs.open(trainfile, "r", encoding="UTF8") as fin:
             sentence = []
@@ -353,7 +421,7 @@ class Tagger(object):
                 if line == "<S>":
                     continue
                 if line == "</S>":
-                    self.count_sentence_cases(sentence, freqs)
+                    self.count_sentence_cases_re(sentence, freqs)
                     del sentence[:]
                     sentence = []
                     continue
@@ -366,9 +434,9 @@ class Tagger(object):
             for case, freq in good_values.iteritems():
                 freqs[k][case] = float(freq) / total
             chosen = argmax([(case, freq) for case, freq in good_values.iteritems()])
-            if not chosen:
+            if chosen is None:
                 continue
-            if len(chosen) > 1:
+            if len(chosen) != 1:
                 continue
             if len(v.keys()) == 1:
                 self.caserules[k] = sorted(chosen)[0]
@@ -380,14 +448,14 @@ class Tagger(object):
             self.caserules[k] = sorted(chosen)[0]
         
         # Тестовый вывод в файл
-        #with codecs.open("prep_stat2.txt", "w", encoding="UTF8") as fout:
+        #with codecs.open("prep_stat_new.txt", "w", encoding="UTF8") as fout:
         #    for k, v in sorted(freqs.items()):
-                #total = sum([freq for freq in v.values()])
-                #entropy = - sum([float(freq) * math.log(float(freq) / total) / total  for freq in v.values()])
+        #        total = sum([freq for freq in v.values()])
+        #        entropy = - sum([float(freq) * math.log(float(freq) / total) / total  for freq in v.values()])
         #        entropy = - sum([freq * math.log(freq) for freq in v.values()])
         #        for case, freq in sorted(v.iteritems()):
         #            fout.write(u"{0}\t{1}\t{2}\t{3:.3f}\t{4:.3f}\n".format(k[0], "|".join(k[1]), case, freq, entropy))
-                
+                    
         # Сериализуем правила
         # Структура: <Предлог>, <Список падежей> : <Правильный падеж>
         dump_data(trainfile + ".caserules.pkl", self.caserules)      
@@ -487,7 +555,7 @@ class Tagger(object):
         """
         caseambigs = [ind for ind in sent_words.keys()
                 if len(sent_words[ind]) > 2
-                and all(info["class"] in self.caseable for info in sent_words[ind][1:])]
+                and all(info["class"] in self.declinable for info in sent_words[ind][1:])]
 
         for ind in caseambigs:
             all_vars = [info for info in sent_words[ind][1:] if info.has_key("info")]
@@ -715,7 +783,7 @@ if __name__ == "__main__":
 
     filename = os.path.join(os.path.dirname(sys.argv[0]), "test/freview.txt")
     trainfile = os.path.join(os.path.dirname(sys.argv[0]),"dicts/ruscorpora.txt.lemma")
-    #prepsfile = os.path.join(os.path.dirname(sys.argv[0]),"corpora/preps_stat.txt")
+    prepsfile = os.path.join(os.path.dirname(sys.argv[0]),"corpora/preps_stat.txt")
     
     print "STARTED:", str(datetime.now())
     start = time.time()
@@ -729,7 +797,6 @@ if __name__ == "__main__":
     #tagger.train(trainfile + ".suffs") # Обучаем тэггер суффиксам
     tagger.load_statistics(trainfile)   # Загружаем суффиксную статистику  
     #tagger.dump_preps(prepsfile)   # Выписываем правила падежей в зависимости от предлогов в текстовый файл
-
     print "Statistics loaded! It took", time.time() - start, "\nParsing file..."
 
     tokens = []  
