@@ -470,12 +470,13 @@ class Tagger(object):
                 fout.write(u"{0}\t{1}\t{2}\n".format(k[0], "|".join(k[1]), v))
         return True
     
-    def load_statistics(self, trainfile):
+    def load_statistics(self, trainfile, process_cases=True):
         """
         Загрузка суффиксной и падежной статистики
         """
         try:
-            self.caserules = unpkl_1layered_s(trainfile + ".caserules.pkl")
+            if process_cases:
+                self.caserules = unpkl_1layered_s(trainfile + ".caserules.pkl")
             #self.freqs = unpkl_2layered_f(trainfilesuff + ".freqs.pkl")
             self.weights = unpkl_1layered_f(trainfile + ".suffs.weights.pkl")
             self.freqs = dawg.BytesDAWG()
