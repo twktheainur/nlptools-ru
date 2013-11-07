@@ -178,20 +178,71 @@ class Tagger(object):
             norms = self.morph.get_graminfo(word.upper())
         if norms:
             lemms = set([info["norm"] for info in norms])
-            if len(lemm) == 1:
+            if len(lemms) == 1:
                 if true_lemma in lemms:
                     return [true_lemma]    
-            if true_lemma in norms:
-                norms.remove(true_lemma)
-            return [true_lemma] + sorted(list(norms))           
+            if true_lemma in lemms:
+                lemms.remove(true_lemma)
+            return [true_lemma] + sorted(list(lemms))           
         return [word.upper()]
 
-    @staticmethod
-    def prepare_corpus(trainfile, suff_len):
+    def get_sentence_cases(self, sentence):
+        """
+        Сбор статистики на основе падежей: обработка одного предложения (sentence)
+        """
+        result = []
+        if not sentence:
+            return []
+        for (ind, info) in enumerate(sentence):
+            if len(info) < 3:
+                continue
+            if not info[2].split("|")[0] in self.declinable: # Работаем только со словами, которые могут иметь падеж
+                continue            
+            norms = self.gram_all(info[0])  # Все возможные варианты лемм текущего слова
+            try:
+                true_cases = set(info[2].split("|")[1].split(",")).intersection(self.cases)
+                if len(true_cases) > 1:
+                    continue
+                true_case = true_cases.pop()
+                all_vars = [norm for norm in norms if norm.has_key("info")]
+                all_cases = set([x for y in [set(norm["info"].split(",")).intersection(self.cases) for norm in all_vars] for x in y])
+                if not true_case in all_cases or len(all_cases) == 1:
+                    continue
+                prep = self.find_prep(sentence, ind)
+                result.append(u"\t".join((prep, u"|".join((sorted(all_cases))), true_case)))
+
+            except Exception:
+                continue
+                      
+        return result
+
+    def prepare_cases(self, trainfile):
+        """
+        Обработка тренировочного корпуса: убираем все, кроме предлогов и падежей
+        """
+        with codecs.open(trainfile, "r", encoding="UTF8") as fin, codecs.open(trainfile + ".cases", "w", encoding="UTF8") as fout:
+            sentence = []
+            for line in fin:
+                if line.strip() == "<S>":
+                    fout.write(line)
+                    sentence = []
+                    continue
+                if line.strip() == "</S>": # Если это метка начала или конца предложения
+                    case_result = self.get_sentence_cases(sentence)
+                    if case_result:
+                        fout.write(u"{0}\n{1}".format("\n".join(case_result), line))
+                    else:
+                        fout.write(line)
+                    del sentence[:]
+                    continue
+                sentence.append(line.strip().split("\t"))
+        return True
+    
+    def prepare_corpus(self, trainfile, suff_len):
         """
         Обработка тренировочного корпуса: убираем все, кроме суффиксов
         """
-        with codecs.open(filename, "r", encoding="UTF8") as fin, codecs.open(filename + ".suffs", "w", encoding="UTF8") as fout:
+        with codecs.open(trainfile, "r", encoding="UTF8") as fin, codecs.open(trainfile + "." + str(suff_len).zfill(2) + ".suffs", "w", encoding="UTF8") as fout:
             for line in fin:
                 line = line.strip()
                 if line == "<S>" or line == "</S>": # Если это метка начала или конца предложения
@@ -200,12 +251,12 @@ class Tagger(object):
                 items = line.split("\t")
                 if len(items) <= 2:
                     continue # Это знак препинания
-                lemms = lemm_list(*items[:2]) # Список возможных лемм, первая - правильная
+                lemms = self.lemm_list(*items[:2]) # Список возможных лемм, первая - правильная
                 word = items[0].upper()
                 suff = suffix(word, suff_len) # Трехбуквенный суффикс слова
                 stem = longest_common([word] + lemms) # Наибольший общий префикс (стем?)
                 lem_flexes = [suffix(lemma, len(lemma) - len(stem)) for lemma in lemms] # Берем только суффиксы от всех лемм
-                fout.write("{0}\t{1}\n".format(suff, "\t".join(lem_flexes)))
+                fout.write(u"{0}\t{1}\n".format(suff, "\t".join(lem_flexes)))
         return True
 
     @staticmethod
@@ -330,7 +381,7 @@ class Tagger(object):
             return True
         return True
         
-    def train(self, trainfile, radius=4, suff_len=3):
+    def train(self, trainfile, radius=2, suff_len=3):
         """
         Сбор статистики на основе суффиксов: обработка всего корпуса
         
@@ -341,7 +392,7 @@ class Tagger(object):
         # Если тренировочный корпус еще не подготовлен, делаем это прямо сейчас
         if trainfile.endswith(".lemma"):
             Tagger.prepare_corpus(trainfile, suff_len)
-            trainfile += ".suffs"
+            trainfile += "." + str(suff_len).zfill(2) + ".suffs"
 
         freqs = defaultdict(lambda: defaultdict(int))
         cfreqs = defaultdict(lambda: defaultdict(int))
@@ -400,7 +451,73 @@ class Tagger(object):
         
         return True
 
-    def train_cases(self, trainfile, threshold=1, small_diff=0.01):
+    def train_cases(self, trainfile, threshold=1, small_diff=0.2):
+        """
+        Обучение снятию падежной омонимии (автоматическое извлечение правил)
+        
+        trainfile - размеченный корпус,
+        threshold - минимальная абсолютная частота вхождения правила в корпус,
+        small_diff - максимальная допустимая разность между двумя вариантами правила с наибольшей вероятностью.
+        """
+
+        # Если тренировочный корпус еще не подготовлен, делаем это прямо сейчас
+        if trainfile.endswith(".lemma"):
+            self.prepare_cases(trainfile)
+            trainfile += ".cases"
+            
+        freqs = defaultdict(lambda: defaultdict(int))
+        self.caserules = defaultdict(str)
+
+        # Собираем частоты из корпуса
+        with codecs.open(trainfile, "r", encoding="UTF8") as fin:
+            sentence = []
+            for line in fin:
+                line = line.strip()
+                if line == "<S>":
+                    continue
+                if line == "</S>":
+                    for parts in sentence:
+                        freqs[(parts[0], tuple(sorted(parts[1].split("|"))))][parts[-1]] += 1
+                    del sentence[:]
+                    sentence = []
+                    continue
+                sentence.append(line.split("\t"))
+
+        # Извлекаем правила
+        for k, v in freqs.iteritems():
+            good_values = {case: freq for case, freq in v.iteritems() if freq >= threshold}
+            total = sum(good_values.values())
+            for case, freq in good_values.iteritems():
+                freqs[k][case] = float(freq) / total
+            chosen = argmax([(case, freq) for case, freq in good_values.iteritems()])
+            if chosen is None:
+                continue
+            if len(chosen) != 1:
+                continue
+            if len(v.keys()) == 1:
+                self.caserules[k] = sorted(chosen)[0]
+                continue
+            second = argmax([(case, freq) for case, freq in good_values.iteritems() if case != chosen[0]])
+            if second:
+                if freqs[k][chosen[0]] - freqs[k][second[0]] < small_diff:
+                    continue
+            self.caserules[k] = sorted(chosen)[0]
+        
+        # Тестовый вывод в файл
+        #with codecs.open("prep_stat_new.txt", "w", encoding="UTF8") as fout:
+        #    for k, v in sorted(freqs.items()):
+        #        total = sum([freq for freq in v.values()])
+        #        entropy = - sum([float(freq) * math.log(float(freq) / total) / total  for freq in v.values()])
+        #        entropy = - sum([freq * math.log(freq) for freq in v.values()])
+        #        for case, freq in sorted(v.iteritems()):
+        #            fout.write(u"{0}\t{1}\t{2}\t{3:.3f}\t{4:.3f}\n".format(k[0], "|".join(k[1]), case, freq, entropy))
+                    
+        # Сериализуем правила
+        # Структура: <Предлог>, <Список падежей> : <Правильный падеж>
+        dump_data(trainfile + ".caserules.pkl", self.caserules)      
+        return True
+
+    def train_cases_full(self, trainfile, threshold=1, small_diff=0.01):
         """
         Обучение снятию падежной омонимии (автоматическое извлечение правил)
         
@@ -410,8 +527,6 @@ class Tagger(object):
         """
         freqs = defaultdict(lambda: defaultdict(int))
         self.caserules = defaultdict(str)
-
-        t = time.time()
 
         # Собираем частоты из корпуса
         with codecs.open(trainfile, "r", encoding="UTF8") as fin:
@@ -470,15 +585,15 @@ class Tagger(object):
                 fout.write(u"{0}\t{1}\t{2}\n".format(k[0], "|".join(k[1]), v))
         return True
     
-    def load_statistics(self, trainfile, process_cases=True):
+    def load_statistics(self, trainfile, suff_len=3, process_cases=True):
         """
         Загрузка суффиксной и падежной статистики
         """
         try:
             if process_cases:
-                self.caserules = unpkl_1layered_s(trainfile + ".caserules.pkl")
+                self.caserules = unpkl_1layered_s(trainfile + ".cases.caserules.pkl")
             #self.freqs = unpkl_2layered_f(trainfilesuff + ".freqs.pkl")
-            self.weights = unpkl_1layered_f(trainfile + ".suffs.weights.pkl")
+            self.weights = unpkl_1layered_f(trainfile + "." + str(suff_len).zfill(2) + ".suffs.weights.pkl")
             self.freqs = dawg.BytesDAWG()
             self.freqs.load(trainfile + ".suffs.freqs.dawg")
             #self.weights = dawg.BytesDAWG()
@@ -696,7 +811,7 @@ class Tagger(object):
             fout.write(u"</S>\n")
         return True
 
-    def parse_all(self, lemmtokens, outfile, radius=4, suff_len=3, sent_marks=False, process_cases=True, small_diff=0.001):
+    def parse_all(self, lemmtokens, outfile, radius=2, suff_len=3, sent_marks=False, process_cases=True, small_diff=0.0001):
         """
         Обработка всего текста сразу (с записью результата в файл)
 
@@ -714,7 +829,7 @@ class Tagger(object):
             self.write_stream(lemmtokens, fout, radius, suff_len, sent_marks, process_cases, small_diff)
         return True
 
-    def parse_chunks(self, filename, radius=4, suff_len=3, chunks=2000, sent_marks=False, process_cases=True, small_diff=0.001):
+    def parse_chunks(self, filename, radius=2, suff_len=3, chunks=2000, sent_marks=False, process_cases=True, small_diff=0.0001):
         """
         Обработка текста частями и запись результата в файл
 
@@ -766,7 +881,7 @@ class Tagger(object):
         self.write_stream(lemmtokens, fout, radius, suff_len, sent_marks, process_cases, small_diff)
         return True
 
-    def get_parsed_sents(self, tokens, radius=4, suff_len=3, process_cases=True, small_diff=0.001):
+    def get_parsed_sents(self, tokens, radius=2, suff_len=3, process_cases=True, small_diff=0.0001):
         """
         Получение списка предложений со снятой морфологической омонимией
 
@@ -794,9 +909,18 @@ if __name__ == "__main__":
     tok = Tokenizer()   # Подгружаем токенизатор
     dater = Dater() # Подгружаем обработчик дат
     tagger = Tagger(morph, morph_simple, dater)  # Подгружаем тэггер
-    #tagger.train_cases(trainfile) # Обучаем тэггер падежам
-    #tagger.train(trainfile + ".suffs") # Обучаем тэггер суффиксам
-    tagger.load_statistics(trainfile)   # Загружаем суффиксную статистику  
+    #t = time.time()
+    #tagger.prepare_cases(trainfile)
+    #print "Cases prepared! It took", time.time() - t
+    #t = time.time()
+    #tagger.train_cases(trainfile + ".cases") # Обучаем тэггер падежам
+    #print "Cases trained! It took", time.time() - t
+    tagger.prepare_corpus(trainfile, 3)
+    tagger.prepare_corpus(trainfile, 4)
+    tagger.prepare_corpus(trainfile, 5)
+    print "Corpus prepared!"
+    tagger.train(trainfile + ".03.suffs", 3) # Обучаем тэггер суффиксам
+    tagger.load_statistics(trainfile, 3)   # Загружаем суффиксную статистику  
     #tagger.dump_preps(prepsfile)   # Выписываем правила падежей в зависимости от предлогов в текстовый файл
     print "Statistics loaded! It took", time.time() - start, "\nParsing file..."
 
