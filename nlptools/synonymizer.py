@@ -47,7 +47,7 @@ def error(text, show_details, details=''):
         print "Details:", details
     return False
 
-class Synonimizer(object):
+class Synonymizer(object):
     """
     Синонимизатор русского текста со снятием морфологической омонимии
     """
@@ -181,7 +181,7 @@ class Synonimizer(object):
                     continue
                 if line == u"</S>":
                     sentence.append(u"*STOP*")
-                    Synonimizer.add_contexts(all_syns, contexts, sentence, n)
+                    Synonymizer.add_contexts(all_syns, contexts, sentence, n)
                     sentence = []
                 if line == "" or len(line.split("\t")) <= 2:
                     continue
@@ -226,7 +226,7 @@ class Synonimizer(object):
                     continue
                 if line == u"</S>": # Конец предложения
                     buff.append(u"*STOP*")
-                    Synonimizer.add_counts(freqs, buff, n)       
+                    Synonymizer.add_counts(freqs, buff, n)       
                 if line == "" or len(line.split("\t")) <= 2:    # Знак препинания
                     continue    
                 # Накапливаем частоты лемм
@@ -294,13 +294,13 @@ class Synonimizer(object):
                     continue
                 if line == "</S>": # Если это не слово, идем дальше
                     if len(buff) > step:
-                        Synonimizer.add_counts_distant(freqs, pos, valid_pos, all_lexemes, buff, step)
+                        Synonymizer.add_counts_distant(freqs, pos, valid_pos, all_lexemes, buff, step)
                     del list(buff)[:]
                     continue
                 if len(line.split("\t")) <= 2:
                     if not line.split("\t")[0] == "-":
                         if len(buff) > step:
-                            Synonimizer.add_counts_distant(freqs, pos, valid_pos, all_lexemes, buff, step)
+                            Synonymizer.add_counts_distant(freqs, pos, valid_pos, all_lexemes, buff, step)
                         del list(buff)[:]
                         buff = []
                     continue
@@ -397,13 +397,13 @@ class Synonimizer(object):
                     continue
                 if line == "</S>": # Если это не слово, идем дальше
                     if len(buff) > step:
-                        Synonimizer.xadd_counts_distant(trie, pos, valid_pos, all_lexemes, buff, step)
+                        Synonymizer.xadd_counts_distant(trie, pos, valid_pos, all_lexemes, buff, step)
                     del list(buff)[:]
                     continue
                 if len(line.split("\t")) <= 2:
                     if not line.split("\t")[0] == "-":
                         if len(buff) > step:
-                            Synonimizer.xadd_counts_distant(trie, pos, valid_pos, all_lexemes, buff, step)
+                            Synonymizer.xadd_counts_distant(trie, pos, valid_pos, all_lexemes, buff, step)
                         del list(buff)[:]
                         buff = []
                     continue
@@ -731,19 +731,19 @@ if __name__ == "__main__":
         traincorpus = "corpus_mix.txt.lemma"    # Обучающий корпус для синонимизации (для метода коллокаций)
         syncorpus = "corp.txt.lemma"  # Обучающий корпус для синонимизации (для всех остальных методов)
 
-        #Synonimizer.train_unigram(syncorpus)
-        #Synonimizer.train_ngram(syncorpus, 2)
-        #Synonimizer.train_ngram(syncorpus, 3)
-        #Synonimizer.train_bayes(syncorpus, 5)
+        #Synonymizer.train_unigram(syncorpus)
+        #Synonymizer.train_ngram(syncorpus, 2)
+        #Synonymizer.train_ngram(syncorpus, 3)
+        #Synonymizer.train_bayes(syncorpus, 5)
 
-        #Synonimizer.count_words(traincorpus)
-        #Synonimizer.count_distant(traincorpus, 3, 4)
-        #Synonimizer.xtrain_collocations(traincorpus, 3)
+        #Synonymizer.count_words(traincorpus)
+        #Synonymizer.count_distant(traincorpus, 3, 4)
+        #Synonymizer.xtrain_collocations(traincorpus, 3)
         
         #params = sys.argv
         filename = os.path.join(os.path.dirname(sys.argv[0]), "test/telenok.txt") # Файл, который будем синонимизировать
         
-        params = ["synonimizer.py", filename, traincorpus,  "-i",  "-disamb", "-col", "-dict", "base.pkl", "-level", 3]
+        params = ["Synonymizer.py", filename, traincorpus,  "-i",  "-disamb", "-col", "-dict", "base.pkl", "-level", 3]
 
         UseDetails = True if "-d" in params else False
 
@@ -754,9 +754,9 @@ if __name__ == "__main__":
         morph_simple = get_morph(os.path.join(os.path.dirname(sys.argv[0]),"pydicts").decode("UTF8"), check_prefixes=False) # Подгружаем русский словарь
         tok = Tokenizer()   # Подгружаем токенизатор
         tagger = Tagger(morph, morph_simple)  # Подгружаем тэггер    
-        syner = Synonimizer(morph_simple, params) # Подгружаем синонимизатор
+        syner = Synonymizer(morph_simple, params) # Подгружаем синонимизатор
         
-        print "Synonimizer statistics loaded! It took", time.time() - start
+        print "Synonymizer statistics loaded! It took", time.time() - start
 
         # Чтение файла (2 попытки: cp1251 и utf-8)
         try:
