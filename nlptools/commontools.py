@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 
 # Common tools for iterables (Python 2.7)
 
