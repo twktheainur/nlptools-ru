@@ -771,22 +771,24 @@ class Tagger(object):
             fout.write(mc.BTAG)
         for (ind, info) in sentence:
             word = info[0].strip()
-            if word != "":
-                lemma = info[1][mc._lemma]
+            if word == "":
+                continue
+            lemma = info[1][mc._lemma]
+            grams = None
+            
+            if mc._gram in info[1].keys():
+                grams = info[1][mc._gram]
                 
-                if mc._gram in info[1].keys():
-                    grams = info[1][mc._gram]
-                    
                 if mc._surn in grams and mc._femn in grams:
                     lemma = female_surname(self.morph, word, lemma)
-                    
-                fout.write("{0}\t{1}".format(info[0], get_same_caps(word, lemma)))
                 
-                if mc._pos in info[1].keys():
-                    fout.write("\t" + info[1][mc._pos])
-                if grams:
-                    fout.write("\t" + ",".join(grams))
-                fout.write("\n")
+            fout.write("{0}\t{1}".format(info[0], get_same_caps(word, lemma)))
+            
+            if mc._pos in info[1].keys():
+                fout.write("\t" + info[1][mc._pos])
+            if grams:
+                fout.write("\t" + ",".join(grams))
+            fout.write("\n")
         if sent_marks:
             fout.write(mc.ETAG)
         return True
@@ -878,13 +880,13 @@ class Tagger(object):
 if __name__ == "__main__":
 
     filename = os.path.join(os.path.dirname(sys.argv[0]), "test/delo.txt")
-    trainfile = os.path.join(os.path.dirname(sys.argv[0]),"dicts/ruscorpora.lemma")
+    trainfile = os.path.join(os.path.dirname(sys.argv[0]),"dicts/ruscorpora.txt.lemma")
     prepsfile = os.path.join(os.path.dirname(sys.argv[0]),"preps_stat.txt")
     
     print("STARTED:", str(datetime.now()))
     start = time.time()
 
-    morph = morph = pymorphy2.MorphAnalyzer()  # Подгружаем русский словарь
+    morph = pymorphy2.MorphAnalyzer()  # Подгружаем русский словарь
 
     tok = Tokenizer()   # Подгружаем токенизатор
     dater = Dater() # Подгружаем обработчик дат
@@ -906,7 +908,7 @@ if __name__ == "__main__":
     #print("Suffix model trained!")
     tagger.load_statistics(trainfile, 3)   # Загружаем суффиксную статистику
     
-    tagger.dump_preps(prepsfile)   # Выписываем правила падежей в зависимости от предлогов в текстовый файл
+    #tagger.dump_preps(prepsfile)   # Выписываем правила падежей в зависимости от предлогов в текстовый файл
     
     print("Statistics loaded! It took", time.time() - start, "\nParsing file...")
 

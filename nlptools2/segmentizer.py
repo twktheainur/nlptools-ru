@@ -20,7 +20,7 @@ class Segmentizer(object):
         Initialize
         """
         self.splitter = re.compile("[.?!]+")
-        self.starter = re.compile(u"[А-ЯЁA-Z\d\"\'\(\)\[\]~`«s-]")
+        self.starter = re.compile("[А-ЯЁA-Z\d\"\'\(\)\[\]~`«s-]")
         self.bad_ender = re.compile("^[А-ЯЁа-яёA-Za-z][а-яёa-z]?$")
 
     def segmentize(self, tokens):
