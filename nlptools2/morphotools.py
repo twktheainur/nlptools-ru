@@ -204,11 +204,19 @@ def concord(var_name, *var_adjs):
             break
     return good
 
-def female_surname(morph, word, true_lemma):
+def adjust_female(morph, word, true_lemma):
     true_paradigm = [x for x in morph.parse(word) if x.normal_form == true_lemma]
     if not true_paradigm:
         return true_lemma
     return true_paradigm[0].inflect({mc._sing, mc._nomn, mc._femn}).word
+
+def adjust_patr(morph, word, true_lemma, femn=False):
+    true_paradigm = [x for x in morph.parse(word) if x.normal_form == true_lemma]
+    if not true_paradigm:
+        return true_lemma
+    if femn:
+        return true_paradigm[0].inflect({mc._sing, mc._nomn, mc._femn, mc._patr}).word 
+    return true_paradigm[0].inflect({mc._sing, mc._nomn, mc._masc, mc._patr}).word    
 
 def nearest_left_noun(sentence, words, ind):
     """

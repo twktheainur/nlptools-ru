@@ -780,7 +780,10 @@ class Tagger(object):
                 grams = info[1][mc._gram]
                 
                 if mc._surn in grams and mc._femn in grams:
-                    lemma = female_surname(self.morph, word, lemma)
+                    lemma = adjust_female(self.morph, word, lemma)
+
+                elif mc._patr in grams:
+                    lemma = adjust_patr(self.morph, word, lemma, mc._femn in grams)
                 
             fout.write("{0}\t{1}".format(info[0], get_same_caps(word, lemma)))
             
