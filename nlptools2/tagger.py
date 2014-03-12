@@ -551,7 +551,7 @@ class Tagger(object):
         """
         with open(filename, "w", encoding="UTF8") as fout:
             for k, v in sorted(self.caserules.items()):
-                fout.write(u"{0}\t{1}\t{2}\n".format(k[0], "|".join(k[1]), v))
+                fout.write("{0}\t{1}\t{2}\n".format(k[0], "|".join(k[1]), v))
         return True
     
     def load_statistics(self, trainfile, suff_len=3, process_cases=True):
