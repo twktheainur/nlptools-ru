@@ -39,7 +39,7 @@ def suffix(word, i):
     Суффикс длины i
     """
     if i == 0:
-        return "_"
+        return mc.NOSUFF
     if len(word) > i:
         return word[-i:]
     return word
