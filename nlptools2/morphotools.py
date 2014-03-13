@@ -198,7 +198,7 @@ def concord(var_name, *var_adjs):
     for var_adj in var_adjs:
         grams_adj = var_adj[mc._gram]
         diff = grams_adj.difference(grams_name)
-        if diff == set([]) or diff == {_plur}:
+        if diff == set() or diff == {_plur}:
             good.append(var_adj)
         else:
             break
