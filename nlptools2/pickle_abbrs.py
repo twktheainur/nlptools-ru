@@ -19,6 +19,6 @@ with open(abbrfile, "r", encoding="UTF8") as fin:
         (word, norm, pos, grams) = line.strip().split("\t")
         abbrs[word]["norm"] = norm
         abbrs[word]["class"] = pos
-        abbrs[word]["info"] = grams
+        abbrs[word]["info"] = {grams}
 
 dump_data(os.path.join(os.path.dirname(sys.argv[0]), "dicts/" + target + ".pkl"), abbrs)
